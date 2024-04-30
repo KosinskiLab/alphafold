@@ -77,10 +77,13 @@ def tf_example_to_features(tf_example: tf.train.Example,
 
 def np_example_to_features(np_example: FeatureDict,
                            config: ml_collections.ConfigDict,
-                           random_seed: int = 0) -> FeatureDict:
+                           random_seed: int = 0, desired_num_res: int = None) -> FeatureDict:
   """Preprocesses NumPy feature dict using TF pipeline."""
   np_example = dict(np_example)
-  num_res = int(np_example['seq_length'][0])
+  if desired_num_res is not None:
+    num_res = desired_num_res
+  else:
+    num_res = int(np_example['seq_length'][0])
   cfg, feature_names = make_data_config(config, num_res=num_res)
 
   if 'deletion_matrix_int' in np_example:

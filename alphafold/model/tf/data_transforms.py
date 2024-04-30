@@ -20,7 +20,6 @@ from alphafold.model.tf import shape_placeholders
 from alphafold.model.tf import utils
 import numpy as np
 import tensorflow.compat.v1 as tf
-
 # Pylint gets confused by the curry1 decorator because it changes the number
 #   of arguments to the function.
 # pylint:disable=no-value-for-parameter
@@ -413,19 +412,20 @@ def make_masked_msa(protein, config, replace_fraction):
 def make_fixed_size(protein, shape_schema, msa_cluster_size, extra_msa_size,
                     num_res, num_templates=0):
   """Guess at the MSA and sequence dimensions to make fixed size."""
-
   pad_size_map = {
       NUM_RES: num_res,
       NUM_MSA_SEQ: msa_cluster_size,
       NUM_EXTRA_SEQ: extra_msa_size,
       NUM_TEMPLATES: num_templates,
   }
-
   for k, v in protein.items():
     # Don't transfer this to the accelerator.
     if k == 'extra_cluster_assignment':
       continue
-    shape = v.shape.as_list()
+    if type(v) ==np.ndarray:
+      shape = v.shape 
+    else:
+      shape = v.shape.as_list()
     schema = shape_schema[k]
     assert len(shape) == len(schema), (
         f'Rank mismatch between shape and shape schema for {k}: '
