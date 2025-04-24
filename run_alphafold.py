@@ -145,6 +145,11 @@ flags.DEFINE_boolean('use_gpu_relax', None, 'Whether to relax on GPU. '
                      'recommended to enable if possible. GPUs must be available'
                      ' if this setting is enabled.')
 
+flags.DEFINE_boolean(
+    'features_only', False,
+    'If true, stop after writing features.pkl and skip all model/relax steps.'
+)
+
 FLAGS = flags.FLAGS
 
 MAX_TEMPLATE_HITS = 20
@@ -264,7 +269,9 @@ def predict_structure(
   features_output_path = os.path.join(output_dir, 'features.pkl')
   with open(features_output_path, 'wb') as f:
     pickle.dump(feature_dict, f, protocol=4)
-
+  if FLAGS.features_only:
+    logging.info('Features only, exiting after writing features.pkl')
+    return
   unrelaxed_pdbs = {}
   unrelaxed_proteins = {}
   relaxed_pdbs = {}
