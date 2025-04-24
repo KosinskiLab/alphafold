@@ -202,7 +202,9 @@ def _assess_hhsearch_hit(
     DuplicateError: If the hit was an exact subsequence of the query.
     LengthError: If the hit was too short.
   """
-  if FLAGS.path_to_mmt is not None:
+  if not hasattr(FLAGS, 'path_to_mmt') or FLAGS.path_to_mmt is None:
+      pass  # normal prefiltering
+  else:
       logging.info("Running in TrueMultimer mode, skipping prefiltering")
       max_subsequence_ratio = 1.05
       min_align_ratio = 0.01
@@ -990,7 +992,7 @@ class HmmsearchHitFeaturizer(TemplateHitFeaturizer):
             # ------------------------------------------------------------------
             # Keep / skip decision
             # ------------------------------------------------------------------
-            if FLAGS.path_to_mmt is None and seq_key in already_seen:
+            if (not hasattr(FLAGS, 'path_to_mmt') or FLAGS.path_to_mmt is None) and seq_key in already_seen:
                 # Not TrueMultimer mode → reject duplicates
                 logging.debug('Skipping duplicate template %s (not TrueMultimer mode)',
                               seq_key)
