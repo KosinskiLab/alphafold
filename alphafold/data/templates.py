@@ -610,6 +610,7 @@ def _extract_template_features(
   templates_aatype = residue_constants.sequence_to_onehot(
       output_templates_sequence, residue_constants.HHBLITS_AA_TO_ID)
 
+
   return (
       {
           'template_all_atom_positions': np.array(templates_all_atom_positions),
