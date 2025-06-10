@@ -84,28 +84,41 @@ def make_msa_features(msas: Sequence[parsers.Msa]) -> FeatureDict:
   return features
 
 
-def run_msa_tool(msa_runner, input_fasta_path: str, msa_out_path: str,
-                 msa_format: str, use_precomputed_msas: bool,
+def run_msa_tool(msa_runner,
+                 input_fasta_path: str,
+                 msa_out_path: str,
+                 msa_format: str,
+                 use_precomputed_msas: bool,
                  max_sto_sequences: Optional[int] = None
                  ) -> Mapping[str, Any]:
-  """Runs an MSA tool, checking if output already exists first."""
-  if not use_precomputed_msas or not os.path.exists(msa_out_path):
+    """Runs an MSA tool, checking if output already exists first."""
+    # If use_precomputed_msas=True and the file exists and is non-empty, read it.
+    if use_precomputed_msas and os.path.exists(msa_out_path):
+        # Quick file-size check (works for any format: .sto, .a3m, etc.)
+        if os.stat(msa_out_path).st_size > 0:
+            logging.warning('Reading precomputed MSA from %s', msa_out_path)
+            if msa_format == 'sto' and max_sto_sequences is not None:
+                truncated = parsers.truncate_stockholm_msa(
+                    msa_out_path, max_sto_sequences)
+                return {'sto': truncated}
+            else:
+                with open(msa_out_path, 'r') as f:
+                    return {msa_format: f.read()}
+        else:
+            logging.warning(
+                'Precomputed MSA at %s is empty → regenerating', msa_out_path)
+
+    # Otherwise (missing file, empty file, or not using precomputed), run the search:
     if msa_format == 'sto' and max_sto_sequences is not None:
-      result = msa_runner.query(input_fasta_path, max_sto_sequences)[0]  # pytype: disable=wrong-arg-count
+        result = msa_runner.query(input_fasta_path, max_sto_sequences)[0]  # pytype: disable=wrong-arg-count
     else:
-      result = msa_runner.query(input_fasta_path)[0]
+        result = msa_runner.query(input_fasta_path)[0]
+
+    # Write the newly generated MSA back to disk (overwriting any old/empty stub)
     with open(msa_out_path, 'w') as f:
-      f.write(result[msa_format])
-  else:
-    logging.warning('Reading MSA from file %s', msa_out_path)
-    if msa_format == 'sto' and max_sto_sequences is not None:
-      precomputed_msa = parsers.truncate_stockholm_msa(
-          msa_out_path, max_sto_sequences)
-      result = {'sto': precomputed_msa}
-    else:
-      with open(msa_out_path, 'r') as f:
-        result = {msa_format: f.read()}
-  return result
+        f.write(result[msa_format])
+
+    return result
 
 
 class DataPipeline:
