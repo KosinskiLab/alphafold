@@ -14,10 +14,10 @@
 """Install script for setuptools."""
 
 from alphafold import version
-from setuptools import find_packages
-from setuptools import setup
+import setuptools
 
-setup(
+
+setuptools.setup(
     name='alphafold',
     version=version.__version__,
     description=(
@@ -29,36 +29,31 @@ setup(
     author_email='alphafold@deepmind.com',
     license='Apache License, Version 2.0',
     url='https://github.com/deepmind/alphafold',
-    packages=find_packages(),
+    packages=setuptools.find_packages(),
+    scripts=['run_alphafold.py'],
     install_requires=[
         'absl-py',
         'biopython',
-        'chex',
         'dm-haiku',
-        'dm-tree',
         'docker',
-        'immutabledict',
         'jax',
+        'matplotlib',
         'ml-collections',
         'numpy',
-        'pandas',
+        'pytest',
         'scipy',
         'tensorflow-cpu',
-    ],
-    tests_require=[
-        'matplotlib',  # For notebook_utils_test.
-        'mock',
     ],
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Science/Research',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: POSIX :: Linux',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
         'Topic :: Scientific/Engineering :: Artificial Intelligence',
     ],
 )

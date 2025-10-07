@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Copyright 2021 DeepMind Technologies Limited
 #
@@ -27,6 +27,11 @@ fi
 if ! command -v aria2c &> /dev/null ; then
   echo "Error: aria2c could not be found. Please install aria2c (sudo apt install aria2)."
   exit 1
+fi
+
+if ! command -v rsync &> /dev/null ; then
+    echo "Error: rsync could not be found. Please install rsync (sudo apt install rsync)."
+    exit 1
 fi
 
 DOWNLOAD_DIR="$1"

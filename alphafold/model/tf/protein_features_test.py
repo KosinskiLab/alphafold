@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for protein_features."""
 import uuid
 
 from absl.testing import absltest
@@ -32,8 +31,9 @@ class FeaturesTest(parameterized.TestCase, tf.test.TestCase):
     tf.disable_v2_behavior()
 
   def testFeatureNames(self):
-    self.assertEqual(len(protein_features.FEATURE_SIZES),
-                     len(protein_features.FEATURE_TYPES))
+    self.assertEqual(
+        len(protein_features.FEATURE_SIZES), len(protein_features.FEATURE_TYPES)
+    )
     sorted_size_names = sorted(protein_features.FEATURE_SIZES.keys())
     sorted_type_names = sorted(protein_features.FEATURE_TYPES.keys())
     for i, size_name in enumerate(sorted_size_names):
@@ -41,10 +41,9 @@ class FeaturesTest(parameterized.TestCase, tf.test.TestCase):
 
   def testReplacement(self):
     for name in protein_features.FEATURE_SIZES.keys():
-      sizes = protein_features.shape(name,
-                                     num_residues=12,
-                                     msa_length=24,
-                                     num_templates=3)
+      sizes = protein_features.shape(
+          name, num_residues=12, msa_length=24, num_templates=3
+      )
       for x in sizes:
         self.assertEqual(type(x), int)
         self.assertGreater(x, 0)

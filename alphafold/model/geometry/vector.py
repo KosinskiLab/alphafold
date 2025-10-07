@@ -14,6 +14,7 @@
 """Vec3Array Class."""
 
 from __future__ import annotations
+
 import dataclasses
 from typing import Union
 
@@ -34,7 +35,7 @@ class Vec3Array:
 
   This is done in order to improve performance and precision.
   On TPU small matrix multiplications are very suboptimal and will waste large
-  compute ressources, furthermore any matrix multiplication on tpu happen in
+  compute resources, furthermore any matrix multiplication on tpu happen in
   mixed bfloat16/float32 precision, which is often undesirable when handling
   physical coordinates.
   In most cases this will also be faster on cpu's/gpu's since it allows for
@@ -53,25 +54,25 @@ class Vec3Array:
       assert all([x == z for x, z in zip(self.x.shape, self.z.shape)])
 
   def __add__(self, other: Vec3Array) -> Vec3Array:
-    return jax.tree_map(lambda x, y: x + y, self, other)
+    return jax.tree.map(lambda x, y: x + y, self, other)
 
   def __sub__(self, other: Vec3Array) -> Vec3Array:
-    return jax.tree_map(lambda x, y: x - y, self, other)
+    return jax.tree.map(lambda x, y: x - y, self, other)
 
   def __mul__(self, other: Float) -> Vec3Array:
-    return jax.tree_map(lambda x: x * other, self)
+    return jax.tree.map(lambda x: x * other, self)
 
   def __rmul__(self, other: Float) -> Vec3Array:
     return self * other
 
   def __truediv__(self, other: Float) -> Vec3Array:
-    return jax.tree_map(lambda x: x / other, self)
+    return jax.tree.map(lambda x: x / other, self)
 
   def __neg__(self) -> Vec3Array:
-    return jax.tree_map(lambda x: -x, self)
+    return jax.tree.map(lambda x: -x, self)
 
   def __pos__(self) -> Vec3Array:
-    return jax.tree_map(lambda x: x, self)
+    return jax.tree.map(lambda x: x, self)
 
   def cross(self, other: Vec3Array) -> Vec3Array:
     """Compute cross product between 'self' and 'other'."""
@@ -103,8 +104,10 @@ class Vec3Array:
   def zeros(cls, shape, dtype=jnp.float32):
     """Return Vec3Array corresponding to zeros of given shape."""
     return cls(
-        jnp.zeros(shape, dtype), jnp.zeros(shape, dtype),
-        jnp.zeros(shape, dtype))  # pytype: disable=wrong-arg-count  # trace-all-classes
+        jnp.zeros(shape, dtype),
+        jnp.zeros(shape, dtype),
+        jnp.zeros(shape, dtype),
+    )  # pytype: disable=wrong-arg-count  # trace-all-classes
 
   def to_array(self) -> jnp.ndarray:
     return jnp.stack([self.x, self.y, self.z], axis=-1)
@@ -114,10 +117,10 @@ class Vec3Array:
     return cls(*utils.unstack(array))
 
   def __getstate__(self):
-    return (VERSION,
-            [np.asarray(self.x),
-             np.asarray(self.y),
-             np.asarray(self.z)])
+    return (
+        VERSION,
+        [np.asarray(self.x), np.asarray(self.y), np.asarray(self.z)],
+    )
 
   def __setstate__(self, state):
     version, state = state
@@ -126,15 +129,15 @@ class Vec3Array:
       object.__setattr__(self, letter, state[i])
 
 
-def square_euclidean_distance(vec1: Vec3Array,
-                              vec2: Vec3Array,
-                              epsilon: float = 1e-6) -> Float:
+def square_euclidean_distance(
+    vec1: Vec3Array, vec2: Vec3Array, epsilon: float = 1e-6
+) -> Float:
   """Computes square of euclidean distance between 'vec1' and 'vec2'.
 
   Args:
     vec1: Vec3Array to compute  distance to
-    vec2: Vec3Array to compute  distance from, should be
-          broadcast compatible with 'vec1'
+    vec2: Vec3Array to compute  distance from, should be broadcast compatible
+      with 'vec1'
     epsilon: distance is clipped from below to be at least epsilon
 
   Returns:
@@ -164,15 +167,15 @@ def normalized(vector: Vec3Array, epsilon: float = 1e-6) -> Vec3Array:
   return vector.normalized(epsilon)
 
 
-def euclidean_distance(vec1: Vec3Array,
-                       vec2: Vec3Array,
-                       epsilon: float = 1e-6) -> Float:
+def euclidean_distance(
+    vec1: Vec3Array, vec2: Vec3Array, epsilon: float = 1e-6
+) -> Float:
   """Computes euclidean distance between 'vec1' and 'vec2'.
 
   Args:
     vec1: Vec3Array to compute euclidean distance to
-    vec2: Vec3Array to compute euclidean distance from, should be
-          broadcast compatible with 'vec1'
+    vec2: Vec3Array to compute euclidean distance from, should be broadcast
+      compatible with 'vec1'
     epsilon: distance is clipped from below to be at least epsilon
 
   Returns:
@@ -184,8 +187,9 @@ def euclidean_distance(vec1: Vec3Array,
   return distance
 
 
-def dihedral_angle(a: Vec3Array, b: Vec3Array, c: Vec3Array,
-                   d: Vec3Array) -> Float:
+def dihedral_angle(
+    a: Vec3Array, b: Vec3Array, c: Vec3Array, d: Vec3Array
+) -> Float:
   """Computes torsion angle for a quadruple of points.
 
   For points (a, b, c, d), this is the angle between the planes defined by

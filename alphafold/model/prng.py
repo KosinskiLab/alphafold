@@ -45,7 +45,7 @@ class SafeKey:
     self._assert_not_used()
     self._used = True
     new_keys = jax.random.split(self._key, num_keys)
-    return jax.tree_map(SafeKey, tuple(new_keys))
+    return jax.tree.map(SafeKey, tuple(new_keys))
 
   def duplicate(self, num_keys=2):
     self._assert_not_used()
@@ -65,5 +65,5 @@ def _safe_key_unflatten(aux_data, children):
 
 
 jax.tree_util.register_pytree_node(
-    SafeKey, _safe_key_flatten, _safe_key_unflatten)
-
+    SafeKey, _safe_key_flatten, _safe_key_unflatten
+)

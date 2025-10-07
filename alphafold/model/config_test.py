@@ -12,31 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+
 from absl.testing import absltest
-from alphafold.model import prng
-import jax
+from absl.testing import parameterized
+from alphafold.model import config
 
 
-class PrngTest(absltest.TestCase):
+class ConfigTest(parameterized.TestCase):
 
-  def test_key_reuse(self):
-
-    init_key = jax.random.PRNGKey(42)
-    safe_key = prng.SafeKey(init_key)
-    _, safe_key = safe_key.split()
-
-    raw_key = safe_key.get()
-
-    self.assertFalse((raw_key == init_key).all())
-
-    with self.assertRaises(RuntimeError):
-      safe_key.get()
-
-    with self.assertRaises(RuntimeError):
-      safe_key.split()
-
-    with self.assertRaises(RuntimeError):
-      safe_key.duplicate()
+  @parameterized.parameters(config.CONFIG_DIFFS.keys())
+  def test_config_dict_and_dataclass_agree(self, model_name):
+    """Ensures model_config() and get_model_config() return same values."""
+    config_dict_json = json.dumps(config.model_config(model_name).to_dict())
+    config_dataclass_json = json.dumps(
+        config.get_model_config(model_name).as_dict(include_none=False)
+    )
+    self.assertJsonEqual(config_dict_json, config_dataclass_json)
 
 
 if __name__ == '__main__':

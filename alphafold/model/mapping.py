@@ -16,8 +16,7 @@
 
 import functools
 import inspect
-
-from typing import Any, Callable, Optional, Sequence, Union
+from typing import Any, Callable, Optional, Sequence, TypeVar, Union
 
 import haiku as hk
 import jax
@@ -31,12 +30,26 @@ partial = functools.partial
 PROXY = object()
 
 
+T = TypeVar('T')
+
+
+def _set_docstring(docstr: str) -> Callable[[T], T]:
+  """Decorator for setting the docstring of a function."""
+
+  def wrapped(fun: T) -> T:
+    fun.__doc__ = docstr.format(fun=getattr(fun, '__name__', repr(fun)))
+    return fun
+
+  return wrapped
+
+
 def _maybe_slice(array, i, slice_size, axis):
   if axis is PROXY:
     return array
   else:
     return jax.lax.dynamic_slice_in_dim(
-        array, i, slice_size=slice_size, axis=axis)
+        array, i, slice_size=slice_size, axis=axis
+    )
 
 
 def _maybe_get_size(array, axis):
@@ -58,7 +71,8 @@ def sharded_map(
     fun: Callable[..., PYTREE_JAX_ARRAY],
     shard_size: Union[int, None] = 1,
     in_axes: Union[int, PYTREE] = 0,
-    out_axes: Union[int, PYTREE] = 0) -> Callable[..., PYTREE_JAX_ARRAY]:
+    out_axes: Union[int, PYTREE] = 0,
+) -> Callable[..., PYTREE_JAX_ARRAY]:
   """Sharded vmap.
 
   Maps `fun` over axes, in a way similar to vmap, but does so in shards of
@@ -89,7 +103,8 @@ def sharded_apply(
     shard_size: Union[int, None] = 1,
     in_axes: Union[int, PYTREE] = 0,
     out_axes: Union[int, PYTREE] = 0,
-    new_out_axes: bool = False) -> Callable[..., PYTREE_JAX_ARRAY]:
+    new_out_axes: bool = False,
+) -> Callable[..., PYTREE_JAX_ARRAY]:
   """Sharded apply.
 
   Applies `fun` over shards to axes, in a way similar to vmap,
@@ -111,8 +126,10 @@ def sharded_apply(
   Returns:
     function with smap applied.
   """
-  docstr = ('Mapped version of {fun}. Takes similar arguments to {fun} '
-            'but with additional array axes over which {fun} is mapped.')
+  docstr = (
+      'Mapped version of {fun}. Takes similar arguments to {fun} '
+      'but with additional array axes over which {fun} is mapped.'
+  )
   if new_out_axes:
     raise NotImplementedError('New output axes not yet implemented.')
 
@@ -120,12 +137,13 @@ def sharded_apply(
   if shard_size is None:
     return fun
 
-  @jax.util.wraps(fun, docstr=docstr)
+  @_set_docstring(docstr)
+  @functools.wraps(fun)
   def mapped_fn(*args):
     # Expand in axes and Determine Loop range
     in_axes_ = _expand_axes(in_axes, args)
 
-    in_sizes = jax.tree_map(_maybe_get_size, args, in_axes_)
+    in_sizes = jax.tree.map(_maybe_get_size, args, in_axes_)
     flat_sizes = jax.tree_util.tree_flatten(in_sizes)[0]
     in_size = max(flat_sizes)
     assert all(i in {in_size, -1} for i in flat_sizes)
@@ -137,29 +155,38 @@ def sharded_apply(
     last_shard_size = shard_size if last_shard_size == 0 else last_shard_size
 
     def apply_fun_to_slice(slice_start, slice_size):
-      input_slice = jax.tree_map(
-          lambda array, axis: _maybe_slice(array, slice_start, slice_size, axis
-                                          ), args, in_axes_)
+      input_slice = jax.tree.map(
+          lambda array, axis: _maybe_slice(
+              array, slice_start, slice_size, axis
+          ),
+          args,
+          in_axes_,
+      )
       return fun(*input_slice)
 
     remainder_shape_dtype = hk.eval_shape(
-        partial(apply_fun_to_slice, 0, last_shard_size))
-    out_dtypes = jax.tree_map(lambda x: x.dtype, remainder_shape_dtype)
-    out_shapes = jax.tree_map(lambda x: x.shape, remainder_shape_dtype)
+        partial(apply_fun_to_slice, 0, last_shard_size)
+    )
+    out_dtypes = jax.tree.map(lambda x: x.dtype, remainder_shape_dtype)
+    out_shapes = jax.tree.map(lambda x: x.shape, remainder_shape_dtype)
     out_axes_ = _expand_axes(out_axes, remainder_shape_dtype)
 
     if num_extra_shards > 0:
       regular_shard_shape_dtype = hk.eval_shape(
-          partial(apply_fun_to_slice, 0, shard_size))
-      shard_shapes = jax.tree_map(lambda x: x.shape, regular_shard_shape_dtype)
+          partial(apply_fun_to_slice, 0, shard_size)
+      )
+      shard_shapes = jax.tree.map(lambda x: x.shape, regular_shard_shape_dtype)
 
       def make_output_shape(axis, shard_shape, remainder_shape):
-        return shard_shape[:axis] + (
-            shard_shape[axis] * num_extra_shards +
-            remainder_shape[axis],) + shard_shape[axis + 1:]
+        return (
+            shard_shape[:axis]
+            + (shard_shape[axis] * num_extra_shards + remainder_shape[axis],)
+            + shard_shape[axis + 1 :]
+        )
 
-      out_shapes = jax.tree_map(make_output_shape, out_axes_, shard_shapes,
-                                out_shapes)
+      out_shapes = jax.tree.map(
+          make_output_shape, out_axes_, shard_shapes, out_shapes
+      )
 
     # Calls dynamic Update slice with different argument order
     # This is here since tree_map only works with positional arguments
@@ -168,9 +195,8 @@ def sharded_apply(
 
     def compute_shard(outputs, slice_start, slice_size):
       slice_out = apply_fun_to_slice(slice_start, slice_size)
-      update_slice = partial(
-          dynamic_update_slice_in_dim, i=slice_start)
-      return jax.tree_map(update_slice, outputs, slice_out, out_axes_)
+      update_slice = partial(dynamic_update_slice_in_dim, i=slice_start)
+      return jax.tree.map(update_slice, outputs, slice_out, out_axes_)
 
     def scan_iteration(outputs, i):
       new_outputs = compute_shard(outputs, i, shard_size)
@@ -181,7 +207,7 @@ def sharded_apply(
     def allocate_buffer(dtype, shape):
       return jnp.zeros(shape, dtype=dtype)
 
-    outputs = jax.tree_map(allocate_buffer, out_dtypes, out_shapes)
+    outputs = jax.tree.map(allocate_buffer, out_dtypes, out_shapes)
 
     if slice_starts.shape[0] > 0:
       outputs, _ = hk.scan(scan_iteration, outputs, slice_starts)
@@ -202,7 +228,8 @@ def inference_subbatch(
     nonbatched_args: Sequence[PYTREE_JAX_ARRAY],
     low_memory: bool = True,
     input_subbatch_dim: int = 0,
-    output_subbatch_dim: Optional[int] = None) -> PYTREE_JAX_ARRAY:
+    output_subbatch_dim: Optional[int] = None,
+) -> PYTREE_JAX_ARRAY:
   """Run through subbatches (like batch apply but with split and concat)."""
   assert len(batched_args) > 0  # pylint: disable=g-explicit-length-test
 
@@ -216,8 +243,11 @@ def inference_subbatch(
   def run_module(*batched_args):
     args = list(batched_args) + list(nonbatched_args)
     return module(*args)
-  sharded_module = sharded_apply(run_module,
-                                 shard_size=subbatch_size,
-                                 in_axes=input_subbatch_dim,
-                                 out_axes=output_subbatch_dim)
+
+  sharded_module = sharded_apply(
+      run_module,
+      shard_size=subbatch_size,
+      in_axes=input_subbatch_dim,
+      out_axes=output_subbatch_dim,
+  )
   return sharded_module(*batched_args)

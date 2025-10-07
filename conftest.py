@@ -1,4 +1,4 @@
-# Copyright 2021 DeepMind Technologies Limited
+# Copyright 2025 DeepMind Technologies Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,15 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Utils for geometry library."""
 
-from typing import List
+"""Fixture for pytest.
 
-import jax.numpy as jnp
+This is needed to parse the absl flags before running the test.
+"""
+
+import sys
+
+from absl import flags
+import pytest
 
 
-def unstack(value: jnp.ndarray, axis: int = -1) -> List[jnp.ndarray]:
-  return [
-      jnp.squeeze(v, axis=axis)
-      for v in jnp.split(value, value.shape[axis], axis=axis)
-  ]
+@pytest.fixture(scope="session", autouse=True)
+def initialize_absl_flags(request):
+  del request
+  # Parse any flags that make sense to absl as absl flags.
+  flags.FLAGS(sys.argv, known_only=True)
