@@ -630,6 +630,7 @@ class EmbeddingsAndEvoformer(hk.Module):
 
     c = self.config
     gc = self.global_config
+    common_modules.set_kernel_context(gc)
 
     batch = dict(batch)
     dtype = jnp.bfloat16 if gc.bfloat16 else jnp.float32

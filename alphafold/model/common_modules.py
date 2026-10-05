@@ -27,6 +27,17 @@ TRUNCATED_NORMAL_STDDEV_FACTOR = np.asarray(
 )
 
 
+# LayerNorm has no access to global_config, so the model records the fused-kernel
+# setting here (set_kernel_context) before its first LayerNorm is traced.
+_kernel_config = {'use_pallas': False, 'compute_capability': None}
+
+
+def set_kernel_context(global_config):
+  """Record global_config's fused-kernel setting for the LayerNorms traced next."""
+  _kernel_config['use_pallas'] = bool(global_config.get('use_pallas', False))
+  _kernel_config['compute_capability'] = global_config.get('compute_capability', None)
+
+
 def get_initializer_scale(initializer_name, input_shape):
   """Get Initializer for weights and scale to multiply activations by."""
 
@@ -172,6 +183,19 @@ class LayerNorm(hk.LayerNorm):
     self._temp_create_offset = create_offset
 
   def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    # A fused kernel replaces the fp32 upcast, normalisation and downcast.
+    last_axis = self.param_axis is None or tuple(self.param_axis) == (-1,)
+    if (last_axis and self._temp_create_scale and self._temp_create_offset
+        and _kernel_config['use_pallas']):
+      from alphafold.model import fused_kernels  # pylint: disable=g-import-not-at-top
+      fused = fused_kernels.layer_norm(_kernel_config, x.dtype)
+      if fused is not None:
+        c = x.shape[-1]
+        scale = hk.get_parameter('scale', (c,), jnp.float32, init=self.scale_init)
+        offset = hk.get_parameter(
+            'offset', (c,), jnp.float32, init=self.offset_init)
+        return fused(x, scale, offset, eps=self.eps)
+
     is_bf16 = x.dtype == jnp.bfloat16
     if is_bf16:
       x = x.astype(jnp.float32)

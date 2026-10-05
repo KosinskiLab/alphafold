@@ -383,6 +383,10 @@ CONFIG = ml_collections.ConfigDict({
             'use_remat': False,
             'zero_init': True,
             'eval_dropout': False,
+            # Fused Pallas kernels from colabfold-kernels (alphafold/model/fused_kernels.py).
+            # bf16 only, NVIDIA compute capability >= 8.0: the caller checks before
+            # enabling, and also sets 'compute_capability'.
+            'use_pallas': False,
         },
         'heads': {
             'distogram': {
@@ -607,6 +611,10 @@ CONFIG_MULTIMER = ml_collections.ConfigDict({
             'use_remat': False,
             'zero_init': True,
             'eval_dropout': False,
+            # Fused Pallas kernels from colabfold-kernels (alphafold/model/fused_kernels.py).
+            # bf16 only, NVIDIA compute capability >= 8.0: the caller checks before
+            # enabling, and also sets 'compute_capability'.
+            'use_pallas': False,
         },
         'heads': {
             'distogram': {
@@ -886,6 +894,8 @@ class GlobalConfig(base_config.BaseConfig):
   eval_dropout: bool
   bfloat16: Optional[bool] = None
   bfloat16_output: Optional[bool] = None
+  use_pallas: bool = False
+  compute_capability: Optional[int] = None
 
 
 class DistogramHead(base_config.BaseConfig):
