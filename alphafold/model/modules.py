@@ -21,6 +21,7 @@ from alphafold.common import residue_constants
 from alphafold.model import all_atom
 from alphafold.model import common_modules
 from alphafold.model import folding
+from alphafold.model import fused_kernels
 from alphafold.model import layer_stack
 from alphafold.model import lddt
 from alphafold.model import mapping
@@ -561,7 +562,9 @@ class Transition(hk.Module):
 
     act = mapping.inference_subbatch(
         transition_module,
-        self.global_config.subbatch_size,
+        fused_kernels.transition_subbatch(
+            self.global_config, act.shape, num_intermediate, act.dtype
+        ),
         batched_args=[act],
         nonbatched_args=[],
         low_memory=not is_training,
@@ -628,15 +631,34 @@ class Attention(hk.Module):
         init=glorot_uniform(),
     )
 
-    q = jnp.einsum('bqa,ahc->bqhc', q_data, q_weights) * key_dim ** (-0.5)
-    k = jnp.einsum('bka,ahc->bkhc', m_data, k_weights)
-    v = jnp.einsum('bka,ahc->bkhc', m_data, v_weights)
-    logits = jnp.einsum('bqhc,bkhc->bhqk', q, k)
-    if nonbatched_bias is not None:
-      logits += jnp.expand_dims(nonbatched_bias, axis=0)
-    logits = jnp.where(mask, logits, _SOFTMAX_MASK)
-    weights = utils.stable_softmax(logits)
-    weighted_avg = jnp.einsum('bhqk,bkhc->bqhc', weights, v)
+    # A fused flash-attention kernel computes scores, softmax and the weighted
+    # average without materialising the [N_queries, N_keys] matrix.
+    attention_kernel = fused_kernels.attention(
+        self.global_config, q_data.dtype, key_dim, value_dim
+    )
+    mask_bias = (
+        fused_kernels.mask_to_bias(mask, q_data.dtype)
+        if attention_kernel is not None
+        else None
+    )
+    if mask_bias is not None:
+      q = jnp.einsum('bqa,ahc->bhqc', q_data, q_weights)
+      k = jnp.einsum('bka,ahc->bhkc', m_data, k_weights)
+      v = jnp.einsum('bka,ahc->bhkc', m_data, v_weights)
+      weighted_avg = attention_kernel(
+          q, k, v, mask_bias, nonbatched_bias, scale=key_dim ** (-0.5)
+      )
+      weighted_avg = jnp.swapaxes(weighted_avg, 1, 2)  # [b, q, h, c]
+    else:
+      q = jnp.einsum('bqa,ahc->bqhc', q_data, q_weights) * key_dim ** (-0.5)
+      k = jnp.einsum('bka,ahc->bkhc', m_data, k_weights)
+      v = jnp.einsum('bka,ahc->bkhc', m_data, v_weights)
+      logits = jnp.einsum('bqhc,bkhc->bhqk', q, k)
+      if nonbatched_bias is not None:
+        logits += jnp.expand_dims(nonbatched_bias, axis=0)
+      logits = jnp.where(mask, logits, _SOFTMAX_MASK)
+      weights = utils.stable_softmax(logits)
+      weighted_avg = jnp.einsum('bhqk,bkhc->bqhc', weights, v)
 
     if self.global_config.zero_init:
       init = hk.initializers.Constant(0.0)
@@ -844,13 +866,17 @@ class MSARowAttentionWithPairBias(hk.Module):
     nonbatched_bias = jnp.einsum('qkc,ch->hqk', pair_act, weights)
 
     attn_mod = Attention(c, self.global_config, msa_act.shape[-1])
-    msa_act = mapping.inference_subbatch(
-        attn_mod,
-        self.global_config.subbatch_size,
-        batched_args=[msa_act, msa_act, mask],
-        nonbatched_args=[nonbatched_bias],
-        low_memory=not is_training,
-    )
+    if fused_kernels.attention_fused(self.global_config, c, msa_act):
+      # The fused kernel never holds the [N, N] matrix, so no chunking is needed.
+      msa_act = attn_mod(msa_act, msa_act, mask, nonbatched_bias)
+    else:
+      msa_act = mapping.inference_subbatch(
+          attn_mod,
+          self.global_config.subbatch_size,
+          batched_args=[msa_act, msa_act, mask],
+          nonbatched_args=[nonbatched_bias],
+          low_memory=not is_training,
+      )
 
     return msa_act
 
@@ -894,13 +920,16 @@ class MSAColumnAttention(hk.Module):
     )(msa_act)
 
     attn_mod = Attention(c, self.global_config, msa_act.shape[-1])
-    msa_act = mapping.inference_subbatch(
-        attn_mod,
-        self.global_config.subbatch_size,
-        batched_args=[msa_act, msa_act, mask],
-        nonbatched_args=[],
-        low_memory=not is_training,
-    )
+    if fused_kernels.attention_fused(self.global_config, c, msa_act):
+      msa_act = attn_mod(msa_act, msa_act, mask)
+    else:
+      msa_act = mapping.inference_subbatch(
+          attn_mod,
+          self.global_config.subbatch_size,
+          batched_args=[msa_act, msa_act, mask],
+          nonbatched_args=[],
+          low_memory=not is_training,
+      )
 
     msa_act = jnp.swapaxes(msa_act, -2, -3)
 
@@ -1010,13 +1039,16 @@ class TriangleAttention(hk.Module):
     nonbatched_bias = jnp.einsum('qkc,ch->hqk', pair_act, weights)
 
     attn_mod = Attention(c, self.global_config, pair_act.shape[-1])
-    pair_act = mapping.inference_subbatch(
-        attn_mod,
-        self.global_config.subbatch_size,
-        batched_args=[pair_act, pair_act, mask],
-        nonbatched_args=[nonbatched_bias],
-        low_memory=not is_training,
-    )
+    if fused_kernels.attention_fused(self.global_config, c, pair_act):
+      pair_act = attn_mod(pair_act, pair_act, mask, nonbatched_bias)
+    else:
+      pair_act = mapping.inference_subbatch(
+          attn_mod,
+          self.global_config.subbatch_size,
+          batched_args=[pair_act, pair_act, mask],
+          nonbatched_args=[nonbatched_bias],
+          low_memory=not is_training,
+      )
 
     if c.orientation == 'per_column':
       pair_act = jnp.swapaxes(pair_act, -2, -3)
@@ -1476,6 +1508,12 @@ class TriangleMultiplication(hk.Module):
 
     left_act = _layer_norm(axis=-1, name='left_norm_input')(left_act)
 
+    gated_dual_proj = fused_kernels.gated_dual_proj(gc, left_act.dtype)
+    if gated_dual_proj is not None:
+      return self._triangle_multiplication_gated_dual_proj(
+          gated_dual_proj, left_act, left_mask
+      )
+
     # Both left and right projections are fused into projection.
     projection = common_modules.Linear(
         2 * c.num_intermediate_channel, name='projection'
@@ -1494,6 +1532,72 @@ class TriangleMultiplication(hk.Module):
     left_proj_act = proj_act[:, :, : c.num_intermediate_channel]
     right_proj_act = proj_act[:, :, c.num_intermediate_channel :]
     act = jnp.einsum(c.equation, left_proj_act, right_proj_act)
+
+    act = _layer_norm(axis=-1, name='center_norm')(act)
+
+    output_channel = int(left_act.shape[-1])
+
+    act = common_modules.Linear(
+        output_channel,
+        initializer=utils.final_init(gc),
+        name='output_projection',
+    )(act)
+
+    gate_values = common_modules.Linear(
+        output_channel,
+        bias_init=1.0,
+        initializer=utils.final_init(gc),
+        name='gating_linear',
+    )(left_act)
+    act *= jax.nn.sigmoid(gate_values)
+
+    return act
+
+  @hk.transparent
+  def _triangle_multiplication_gated_dual_proj(
+      self, gated_dual_proj, left_act, left_mask
+  ):
+    """_fused_triangle_multiplication with its projection, gate and mask in one kernel.
+
+    Same parameters as the stock path (`projection` and `gate`, each `weights` and
+    `bias`). The kernel writes the left and right halves as two contiguous
+    channel-major arrays, so the einsum runs over [c, i, k] without transposes.
+    """
+    c = self.config
+    gc = self.global_config
+    ci = c.num_intermediate_channel
+    cz = left_act.shape[-1]
+    n0, n1 = left_act.shape[0], left_act.shape[1]
+
+    def linear_params(name, bias_init):
+      with hk.experimental.name_scope(name):
+        weights = hk.get_parameter(
+            'weights', (cz, 2 * ci), left_act.dtype,
+            init=hk.initializers.TruncatedNormal(),
+        )
+        bias = hk.get_parameter(
+            'bias', (2 * ci,), left_act.dtype,
+            init=hk.initializers.Constant(bias_init),
+        )
+      return weights, bias
+
+    proj_w, proj_b = linear_params('projection', 0.0)
+    gate_w, gate_b = linear_params('gate', 1.0)
+    left_proj_act, right_proj_act = gated_dual_proj(
+        left_act.reshape(-1, cz), proj_w, proj_b, gate_w, gate_b,
+        left_mask.reshape(-1).astype(left_act.dtype),
+        split=True, channel_major=True,
+    )
+    left_proj_act = left_proj_act.reshape(ci, n0, n1)
+    right_proj_act = right_proj_act.reshape(ci, n0, n1)
+    # 'ikc,jkc->ijc' becomes 'cik,cjk->cij' (channel first), then back to [i, j, c].
+    lhs, rhs = c.equation.split('->')[0].split(',')
+    channel_first = lambda term: term[-1] + term[:-1]
+    act = jnp.einsum(
+        f'{channel_first(lhs)},{channel_first(rhs)}->cij',
+        left_proj_act, right_proj_act,
+    )
+    act = jnp.transpose(act, (1, 2, 0))
 
     act = _layer_norm(axis=-1, name='center_norm')(act)
 
@@ -1917,6 +2021,7 @@ class EmbeddingsAndEvoformer(hk.Module):
 
     c = self.config
     gc = self.global_config
+    common_modules.set_kernel_context(gc)
 
     if safe_key is None:
       safe_key = prng.SafeKey(hk.next_rng_key())
